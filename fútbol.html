@@ -1,0 +1,246 @@
+<!doctype html>
+
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fútbol simple — mini PES 2010</title>
+  <style>
+    /* Estilos básicos */
+    :root{--bg:#1b6;--field:#3aa55d;--line:#eaf;--panel:#222;color:#fff}
+    html,body{height:100%;margin:0;font-family:system-ui,Arial;background:linear-gradient(#043,#012);display:flex;align-items:center;justify-content:center}
+    .wrap{width:900px;max-width:96vw;background:var(--panel);padding:16px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.6)}
+    header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+    h1{font-size:18px;margin:0}
+    #hud{margin-left:auto;display:flex;gap:8px;align-items:center}
+    button{background:#fff;color:#111;border:0;padding:6px 10px;border-radius:6px;cursor:pointer}
+    canvas{display:block;background:linear-gradient(#2fb,#1b8);border-radius:6px;width:100%;height:auto}
+    .controls{color:#ddd;font-size:13px;margin-top:8px}
+    .score{font-weight:700}
+    footer{color:#bbb;font-size:12px;margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Mini PES 2010 — juego sencillo</h1>
+      <div id="hud">
+        <div>Tiempo: <span id="time">60</span>s</div>
+        <div>Marcador: <span class="score" id="score">0 - 0</span></div>
+        <button id="restart">Reiniciar</button>
+      </div>
+    </header><!-- CANVAS donde está el juego -->
+<canvas id="game" width="880" height="480"></canvas>
+
+<div class="controls">
+  Controles: Flechas para mover | Espacio para chutar (fuerte si vas rápido).<br>
+  Objetivo: anotar en la portería derecha antes de que se acabe el tiempo.
+</div>
+<footer>
+  Código didáctico: usa <em>canvas</em>, vectores simples y lógica de colisión.
+</footer>
+
+  </div>  <script>
+    /* --- CONFIG Y UTILIDADES --- */
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+
+    // HUD
+    const timeEl = document.getElementById('time');
+    const scoreEl = document.getElementById('score');
+    const restartBtn = document.getElementById('restart');
+
+    // Estado del juego
+    let keys = {};
+    let score = {player:0, enemy:0};
+    let timeLeft = 60; // segundos
+    let lastTime = performance.now();
+    let running = true;
+
+    // Campo y portería
+    const goal = {x: W-60, y: H/2 - 60, w: 40, h: 120};
+
+    // Jugador
+    const player = {x: 120, y: H/2, r: 14, vx:0, vy:0, speed: 220};
+    // Portador/bola
+    const ball = {x: player.x + 30, y: player.y, r:8, vx:0, vy:0};
+
+    // Portero (enemigo simple)
+    const keeper = {x: W-30, y: H/2, r:18, vy:80, dir:1};
+
+    // Fricción del balón
+    const FRICTION = 0.995;
+
+    /* --- EVENTOS DE TECLADO --- */
+    addEventListener('keydown', e => { keys[e.key] = true; if(e.key===' '){ e.preventDefault(); } });
+    addEventListener('keyup', e => { keys[e.key] = false; });
+
+    restartBtn.addEventListener('click', resetGame);
+
+    /* --- FUNCIONES DEL JUEGO --- */
+
+    function resetPositions(){
+      player.x = 120; player.y = H/2; player.vx = player.vy = 0;
+      ball.x = player.x + 30; ball.y = player.y; ball.vx = ball.vy = 0;
+      keeper.x = W-30; keeper.y = H/2; keeper.dir = 1;
+    }
+
+    function resetGame(){
+      score = {player:0, enemy:0};
+      timeLeft = 60; updateHUD(); resetPositions(); running = true; lastTime = performance.now();
+    }
+
+    function updateHUD(){
+      scoreEl.textContent = `${score.player} - ${score.enemy}`;
+      timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+    }
+
+    function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+    function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+    /* --- LÓGICA SIMPLE DE FÍSICA Y COLISIONES --- */
+    function update(dt){
+      if(!running) return;
+
+      // Tiempo
+      timeLeft -= dt;
+      if(timeLeft <= 0){ running = false; timeLeft = 0; }
+
+      // Mov. jugador (Física por velocidad simple)
+      let ax = 0, ay = 0;
+      if(keys['ArrowUp'] || keys['w']) ay = -1;
+      if(keys['ArrowDown'] || keys['s']) ay = 1;
+      if(keys['ArrowLeft'] || keys['a']) ax = -1;
+      if(keys['ArrowRight'] || keys['d']) ax = 1;
+      // Normalizar para mover igual en diagonal
+      const mag = Math.hypot(ax,ay) || 1;
+      ax /= mag; ay /= mag;
+      player.vx = ax * player.speed;
+      player.vy = ay * player.speed;
+      player.x += player.vx * dt;
+      player.y += player.vy * dt;
+      player.x = clamp(player.x, player.r+10, W - 200);
+      player.y = clamp(player.y, player.r+10, H - player.r - 10);
+
+      // Si el jugador toca la pelota, la bola lo sigue (control)
+      const d = Math.hypot(ball.x - player.x, ball.y - player.y);
+      if(d < player.r + ball.r + 6){
+        // Mantén la bola delante del jugador
+        const angle = Math.atan2(ball.y - player.y, ball.x - player.x);
+        const targetDist = player.r + ball.r + 2;
+        ball.x = player.x + Math.cos(angle) * targetDist;
+        ball.y = player.y + Math.sin(angle) * targetDist;
+        // si se aprieta espacio --> chutar
+        if(keys[' ']){
+          // impulso según velocidad del jugador
+          const power = clamp(Math.hypot(player.vx, player.vy)/player.speed, 0.6, 1.6);
+          const kickAngle = angle; // hacia donde apunta la bola (hacia delante)
+          const speed = 420 * power;
+          ball.vx = Math.cos(kickAngle) * speed;
+          ball.vy = Math.sin(kickAngle) * speed;
+          // pequeña separación para evitar chutes infinitos
+          ball.x += ball.vx * dt * 0.02; ball.y += ball.vy * dt * 0.02;
+          // evitar que space quede pegada
+          keys[' '] = false;
+        }
+      }
+
+      // Actualiza balón (física simple)
+      ball.x += ball.vx * dt; ball.y += ball.vy * dt;
+      ball.vx *= FRICTION; ball.vy *= FRICTION;
+      // colisión con paredes
+      if(ball.y - ball.r < 10){ ball.y = 10 + ball.r; ball.vy *= -0.6; }
+      if(ball.y + ball.r > H - 10){ ball.y = H - 10 - ball.r; ball.vy *= -0.6; }
+      if(ball.x - ball.r < 10){ ball.x = 10 + ball.r; ball.vx *= -0.6; }
+
+      // IA sencilla: portero se mueve verticalmente intentando interceptar
+      if(Math.abs(keeper.y - ball.y) > 6){
+        keeper.y += keeper.dir * keeper.vy * dt;
+      }
+      // cambia dirección en bordes y cuando alcanza objetivo
+      if(keeper.y < 40) keeper.dir = 1;
+      if(keeper.y > H-40) keeper.dir = -1;
+      // portero persigue la pelota cuando está cerca del área
+      if(ball.x > W - 260) {
+        // mover hacia la pelota suavemente
+        keeper.y += (ball.y - keeper.y) * 0.06 * (1 + Math.random()*0.2);
+      }
+
+      // Colisión balón-portero
+      const dkp = Math.hypot(ball.x - keeper.x, ball.y - keeper.y);
+      if(dkp < keeper.r + ball.r){
+        // empuja la pelota hacia afuera
+        const ang = Math.atan2(ball.y - keeper.y, ball.x - keeper.x);
+        const push = 260;
+        ball.vx = Math.cos(ang) * push;
+        ball.vy = Math.sin(ang) * push;
+        ball.x = keeper.x + Math.cos(ang) * (keeper.r + ball.r + 1);
+        ball.y = keeper.y + Math.sin(ang) * (keeper.r + ball.r + 1);
+      }
+
+      // Si la pelota entra en la portería -> gol
+      if(ball.x + ball.r > goal.x && ball.y > goal.y && ball.y < goal.y + goal.h){
+        // si la pelota supera la línea X de la portería
+        score.player += 1;
+        resetPositions();
+      }
+
+      // update HUD
+      updateHUD();
+    }
+
+    /* --- DIBUJO --- */
+    function draw(){
+      // fondo
+      ctx.clearRect(0,0,W,H);
+
+      // campo
+      ctx.fillStyle = '#2aa664';
+      ctx.fillRect(0,0,W,H);
+      // lineas
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+      // borde
+      ctx.strokeRect(8,8,W-16,H-16);
+      // linea central
+      ctx.beginPath(); ctx.moveTo(W/2, 8); ctx.lineTo(W/2, H-8); ctx.stroke();
+
+      // portería (derecha)
+      ctx.fillStyle = '#222';
+      ctx.fillRect(goal.x, goal.y, goal.w, goal.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fillRect(goal.x-6, goal.y, 6, goal.h);
+
+      // jugador
+      ctx.beginPath(); ctx.fillStyle = '#0d47a1'; ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
+      // bola
+      ctx.beginPath(); ctx.fillStyle = '#fff'; ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#ccc'; ctx.lineWidth=1; ctx.stroke();
+
+      // portero
+      ctx.beginPath(); ctx.fillStyle = '#b71c1c'; ctx.arc(keeper.x, keeper.y, keeper.r, 0, Math.PI*2); ctx.fill();
+
+      // UI simple en canvas
+      ctx.fillStyle = '#fff'; ctx.font = '16px Arial';
+      ctx.fillText(`Tiempo: ${Math.ceil(timeLeft)}s`, 14, 24);
+      ctx.fillText(`Score: ${score.player} - ${score.enemy}`, 14, 44);
+    }
+
+    /* --- BUCLE PRINCIPAL --- */
+    function loop(now){
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // inicia
+    resetGame();
+    requestAnimationFrame(loop);
+
+    // Mensaje simple para principiantes: abrir consola para ver valores
+    console.log('Juego cargado. Controles: Flechas + Espacio.');
+  </script></body>
+</html>
